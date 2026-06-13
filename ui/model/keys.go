@@ -593,10 +593,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	case "+", "=":
 		m.player.SetVolume(m.player.Volume() + 1)
+		// Save the clamped volume returned by the player after SetVolume to
+		// handle limits correctly. Errors are suppressed to avoid spamming the
+		// user during rapid +/- key presses.
+		_ = m.configSaver.Save("volume", fmt.Sprintf("%.2f", m.player.Volume()))
 		m.notifyPlayback()
 
 	case "-":
 		m.player.SetVolume(m.player.Volume() - 1)
+		_ = m.configSaver.Save("volume", fmt.Sprintf("%.2f", m.player.Volume()))
 		m.notifyPlayback()
 
 	case "r":

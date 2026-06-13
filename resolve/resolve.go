@@ -455,9 +455,19 @@ func resolveYouTube(pageURL string) ([]playlist.Track, error) {
 		}
 		// Native library failed (e.g. YouTube Radio/Mix playlists are dynamic
 		// and unsupported). Fall back to yt-dlp which handles them.
-		if tracks, err := resolveYTDL(pageURL); err == nil && len(tracks) > 0 {
+		tracks, errYTDL := resolveYTDL(pageURL)
+		if errYTDL == nil && len(tracks) > 0 {
 			return tracks, nil
 		}
+
+		// Return the most useful error instead of falling through to GetVideo
+		if errYTDL != nil {
+			return nil, fmt.Errorf("playlist fallback yt-dlp: %w", errYTDL)
+		}
+		if err == nil {
+			return nil, fmt.Errorf("youtube playlist resolve: empty playlist returned from fallback")
+		}
+		return nil, fmt.Errorf("youtube playlist resolve: %w", err)
 	}
 
 	// Single video.
@@ -525,7 +535,7 @@ func resolveYTDLRange(pageURL string, start, end int) ([]playlist.Track, error) 
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("yt-dlp: timed out resolving %s (30s)", pageURL)
 		}
-		msg := strings.TrimSpace(stderr.String())
+		msg := cleanYTDLError(stderr.String())
 		if msg != "" {
 			return nil, fmt.Errorf("yt-dlp: %s", msg)
 		}
@@ -593,7 +603,7 @@ func DownloadYTDL(pageURL, saveDir string) (string, error) {
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
+		msg := cleanYTDLError(stderr.String())
 		if msg != "" {
 			return "", fmt.Errorf("yt-dlp: %s", msg)
 		}
@@ -608,6 +618,27 @@ func DownloadYTDL(pageURL, saveDir string) (string, error) {
 		return "", fmt.Errorf("yt-dlp: no file downloaded for %s", pageURL)
 	}
 	return e.Filename, nil
+}
+
+// cleanYTDLError extracts the most relevant single-line error from yt-dlp's stderr
+// to prevent multi-line warnings from breaking the TUI layout.
+func cleanYTDLError(stderr string) string {
+	var errLine string
+	var lastLine string
+	for _, l := range strings.Split(stderr, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		lastLine = l
+		if strings.HasPrefix(l, "ERROR:") {
+			errLine = l
+		}
+	}
+	if errLine != "" {
+		return errLine
+	}
+	return lastLine
 }
 
 // parseItunesDuration parses an <itunes:duration> value into seconds.

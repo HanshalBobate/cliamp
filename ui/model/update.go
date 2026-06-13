@@ -307,6 +307,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case []playlist.PlaylistInfo:
 		m.providerLists = msg
 		m.provLoading = false
+
+		// Auto-load tracks if the provider only exposes a single playlist.
+		if len(msg) == 1 {
+			m.activeProviderPlaylistID = msg[0].ID
+			m.provLoading = true
+			return m, fetchTracksCmd(m.provider, msg[0].ID)
+		}
+
 		// Start loading catalog when the provider supports lazy catalog loading.
 		if loader, ok := m.provider.(provider.CatalogLoader); ok && !m.catalogBatch.loading && !m.catalogBatch.done {
 			m.catalogBatch.loading = true
@@ -717,6 +725,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case playback.SetVolumeMsg:
 		m.player.SetVolume(msg.VolumeDB)
+		// intentionally ignore save error: best-effort persistence for UX, not fatal
+		_ = m.configSaver.Save("volume", fmt.Sprintf("%.2f", m.player.Volume()))
 		m.notifyAll()
 		return m, nil
 
@@ -772,6 +782,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ipc.VolumeMsg:
 		m.player.SetVolume(msg.DB)
+		// intentionally ignore save error: best-effort persistence for UX, not fatal
+		_ = m.configSaver.Save("volume", fmt.Sprintf("%.2f", m.player.Volume()))
 		m.notifyAll()
 		return m, nil
 	case ipc.SeekMsg:

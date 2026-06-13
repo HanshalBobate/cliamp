@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"cliamp/external/soundcloud"
 	"cliamp/external/spotify"
 	"cliamp/external/ytmusic"
+	"cliamp/external/ytplaylist"
 	"cliamp/internal/appdir"
 	"cliamp/internal/appmeta"
 	"cliamp/internal/playback"
@@ -62,13 +64,44 @@ func run(overrides config.Overrides, positional []string, daemon bool) error {
 		applog.Info("cliamp starting (version=%s level=%s)", appmeta.Version(), appliedLevel)
 	}
 
-	// Build provider list: Radio is always available, Navidrome and Spotify if configured.
-	radioProv := radio.New()
-	localProv := local.New()
+	cust, err := config.LoadCustomisations()
+	if err != nil {
+		// Log and continue with empty defaults so a corrupt file doesn't
+		// prevent the player from starting.
+		applog.Info("customisations: failed to load, using defaults: %v", err)
+		cust = config.Customisations{ProviderNames: make(map[string]string)}
+	}
 
 	var providers []model.ProviderEntry
-	providers = append(providers, model.ProviderEntry{Key: "radio", Name: "Radio", Provider: radioProv})
-	if localProv != nil {
+
+	radioName := "Radio"
+	if name, ok := cust.ProviderNames["radio"]; ok && name != "" {
+		radioName = name
+	}
+
+	radioUrl := strings.TrimSpace(cust.RadioReplacement)
+	if radioUrl != "" {
+		providers = append(providers, model.ProviderEntry{Key: "radio", Name: radioName, Provider: ytplaylist.New(radioUrl)})
+	} else {
+		radioProv := radio.New()
+		providers = append(providers, model.ProviderEntry{Key: "radio", Name: radioName, Provider: radioProv})
+	}
+
+	for i, ep := range cust.ExtraPlaylists {
+		epUrl := strings.TrimSpace(ep.URL)
+		if epUrl == "" {
+			continue
+		}
+		key := fmt.Sprintf("extra_%d", i)
+		name := strings.TrimSpace(ep.Name)
+		if name == "" {
+			name = "Custom Playlist"
+		}
+		providers = append(providers, model.ProviderEntry{Key: key, Name: name, Provider: ytplaylist.New(epUrl)})
+	}
+
+	localProv := local.New()
+	if localProv != nil && !cust.HideLocal {
 		providers = append(providers, model.ProviderEntry{Key: "local", Name: "Local", Provider: localProv})
 	}
 
@@ -209,11 +242,16 @@ func run(overrides config.Overrides, positional []string, daemon bool) error {
 		}
 		pl.Add(tracks...)
 	} else if defaultRadio {
-		pl.Add(
-			playlist.Track{Path: "http://radio.cliamp.stream/lofi/stream", Title: "Lofi Stream", Stream: true},
-			playlist.Track{Path: "http://radio.cliamp.stream/synthwave/stream", Title: "Synthwave Stream", Stream: true},
-			playlist.Track{Path: "http://radio.cliamp.stream/edm/stream", Title: "EDM Stream", Stream: true},
-		)
+		radioUrl := strings.TrimSpace(cust.RadioReplacement)
+		if radioUrl != "" {
+			resolved.Pending = append(resolved.Pending, radioUrl)
+		} else {
+			pl.Add(
+				playlist.Track{Path: "http://radio.cliamp.stream/lofi/stream", Title: "Lofi Stream", Stream: true},
+				playlist.Track{Path: "http://radio.cliamp.stream/synthwave/stream", Title: "Synthwave Stream", Stream: true},
+				playlist.Track{Path: "http://radio.cliamp.stream/edm/stream", Title: "EDM Stream", Stream: true},
+			)
+		}
 	}
 	pl.Add(resolved.Tracks...)
 
@@ -516,6 +554,14 @@ func main() {
 	appmeta.SetVersion(version)
 	app := buildApp()
 	if err := app.Run(context.Background(), os.Args); err != nil {
+		if errors.Is(err, ErrCustomisationsCleared) {
+			fmt.Println("All customisations have been cleared and returned to defaults.")
+			os.Exit(0)
+		}
+		if errors.Is(err, ErrCustomisationsSaved) {
+			fmt.Println("Customisations saved successfully!")
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

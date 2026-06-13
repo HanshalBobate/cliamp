@@ -449,7 +449,7 @@ func (m Model) renderControls() string {
 }
 
 func (m Model) renderProviderPill() string {
-	if len(m.providers) <= 1 {
+	if len(m.providers) < 1 {
 		return ""
 	}
 

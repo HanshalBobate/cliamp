@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -22,6 +23,9 @@ import (
 	"cliamp/ui"
 	"cliamp/upgrade"
 )
+
+var ErrCustomisationsCleared = errors.New("customisations cleared")
+var ErrCustomisationsSaved = errors.New("customisations saved")
 
 func buildApp() *cli.Command {
 	rootFlags := []cli.Flag{
@@ -45,6 +49,8 @@ func buildApp() *cli.Command {
 		&cli.StringFlag{Name: "log-level", Usage: "log level: debug, info, warn, error"},
 		&cli.BoolFlag{Name: "low-power", Usage: "low-power mode: reduce CPU by lowering UI cadence and disabling visualization"},
 		&cli.BoolFlag{Name: "daemon", Aliases: []string{"d"}, Usage: "run headless (no TUI), serving IPC for scripts/Waybar"},
+		&cli.BoolFlag{Name: "customise", Usage: "interactive wizard to customise app data"},
+		&cli.BoolFlag{Name: "clear-all", Usage: "clear all customisations (must be used with --customise)"},
 	}
 
 	return &cli.Command{
@@ -53,6 +59,25 @@ func buildApp() *cli.Command {
 		Version: version,
 		Flags:   rootFlags,
 		Action: func(ctx context.Context, c *cli.Command) error {
+			if c.Bool("clear-all") && !c.Bool("customise") {
+				return fmt.Errorf("--clear-all must be used together with --customise")
+			}
+			if c.Bool("customise") {
+				if c.Bool("clear-all") {
+					if err := config.ClearCustomisations(); err != nil {
+						return fmt.Errorf("failed to clear customisations: %w", err)
+					}
+					return ErrCustomisationsCleared
+				}
+				saved, err := cmd.Customise()
+				if err != nil {
+					return fmt.Errorf("customise: %w", err)
+				}
+				if saved {
+					return ErrCustomisationsSaved
+				}
+				return nil
+			}
 			if strings.EqualFold(c.String("audio-device"), "list") {
 				return listAudioDevices()
 			}

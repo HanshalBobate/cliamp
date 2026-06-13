@@ -236,12 +236,8 @@ func (p *Provider) IsSearching() bool {
 // Browser API and appends them to the provider's catalog.
 // Implements provider.CatalogLoader.
 func (p *Provider) LoadCatalogPage(offset, limit int) (int, error) {
-	stations, err := TopStationsOffset(offset, limit)
-	if err != nil {
-		return 0, err
-	}
-	p.AppendCatalog(stations)
-	return len(stations), nil
+	// Catalog loading is disabled to only show custom stations.
+	return 0, nil
 }
 
 // SearchCatalog performs a server-side station search via the Radio Browser API.
